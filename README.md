@@ -583,9 +583,8 @@ maarMofsed/
 │   └── main.cpp               # Application entry point
 │
 ├── README.md                    # This file
-├── LICENSE                      # MIT License
+├── LICENSE                      # License
 ├── NOTICE                       # Legal notices
-└── ATTRIBUTION.md              # Licensing details
 ```
 
 ### Running Simulations
