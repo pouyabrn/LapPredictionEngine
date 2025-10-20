@@ -954,3 +954,4 @@ I'd love to hear about:
 - Any bugs or issues you've found
 
 **Happy simulating!** 🏎️
+<img width="728" height="773" alt="Capture" src="https://github.com/user-attachments/assets/de336ab1-5368-4d2d-852e-2ade7959ea1e" />
