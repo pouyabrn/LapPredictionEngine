@@ -6,10 +6,10 @@
  * the single fastest, most optimal lap time and corresponding racing line.
  * 
  * Usage:
- *   ./lap_sim <track_json> <vehicle_json> [options]
- * 
+ *   ./lap_sim <track_csv_or_json> <vehicle_json> [options]
+ *
  * Example:
- *   ./lap_sim track.json vehicle.json --output telemetry.csv
+ *   ./lap_sim examples/montreal.csv examples/f1_2025.json --csv outputs/run.csv
  */
 
 #include "io/JSONParser.h"
@@ -25,7 +25,7 @@
 using namespace LapTimeSim;
 
 void printUsage(const char* program_name) {
-    std::cout << "Usage: " << program_name << " <track_csv> <vehicle_json> [options]\n";
+    std::cout << "Usage: " << program_name << " <track_csv_or_json> <vehicle_json> [options]\n";
     std::cout << "\nOptions:\n";
     std::cout << "  --csv <file>        Export telemetry to CSV file\n";
     std::cout << "  --json <file>       Export telemetry to JSON file\n";
