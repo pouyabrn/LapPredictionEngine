@@ -579,6 +579,10 @@ LapResult QuasiSteadyStateSolver::getDetailedResult() const {
         const size_t j = (i + 1) % n_points_;
         time += 2.0 * segments_[i].ds / std::max(0.1, v_[i] + v_[j]);
     }
+    // Close the periodic lap explicitly so exported telemetry includes its final segment.
+    auto closing_state = createState(0, lap_time_);
+    closing_state.s = stats_.line_length;
+    result.addState(closing_state);
     return result;
 }
 

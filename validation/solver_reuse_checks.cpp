@@ -24,6 +24,13 @@ int main() {
         }
         std::cout << "Cold solve " << cold_ms << " ms, reused " << solver.getStats().solve_time_ms
                   << " ms, lap " << second << " s\n";
+        const auto telemetry = solver.getDetailedResult();
+        const auto& first_state = telemetry.getStates().front();
+        const auto& closing_state = telemetry.getStates().back();
+        if (closing_state.timestamp != second || closing_state.s != telemetry.getTotalDistance() ||
+            closing_state.x != first_state.x || closing_state.y != first_state.y || closing_state.v != first_state.v) {
+            throw std::runtime_error("Telemetry did not close the complete periodic lap");
+        }
         car.tire.mu_y = 0.5; // caller edits must not diverge from the model snapshot
         if (std::abs(second - solver.solve()) > 1e-9) {
             throw std::runtime_error("Caller vehicle edit changed a constructed solver");

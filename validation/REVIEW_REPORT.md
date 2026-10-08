@@ -16,6 +16,7 @@ Kept: the RK2 forward/backward solver, axle load transfer, tire load sensitivity
 - Made hybrid convergence truthful when the iteration budget is exhausted; retained an energy-feasible solution.
 - Persisted the fitted Zandvoort banking values. The saved fit and shipped sidecar had disagreed; the calibration writer now saves both car parameters and banking.
 - Added exact racing-line node export. Re-importing the old sampled CSV lost information in tight corners and changed lap time. Four roundtrip checks now pass without loosening their tolerance.
+- Closed exported telemetry at the exact lap distance/time, including the final periodic segment. Replay and CSV-derived duration now agree with the summary.
 - Replaced the additive line-cache signature with an ordered bitwise hash of geometry and line options; checked invalidation, corrupt cache recovery and repeatability.
 - Reused prepared geometry and corner limits in repeated library solves. GGV grids are generated only when requested.
 - Made the solver own a car snapshot, preventing stale cached physics if callers mutate their original car object. Added updateVehicle() to retain geometry while safely rebuilding changed physics and invalidating old telemetry.
