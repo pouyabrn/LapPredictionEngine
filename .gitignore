@@ -36,9 +36,18 @@ Thumbs.db
 *.swp
 *.swo
 *~
+*Zone.Identifier
 
 # Temporary files
 *.tmp
 *.bak
 *.log
 
+# Python
+__pycache__/
+*.pyc
+
+# FastF1 validation: downloaded cache, telemetry extracts and plots (regenerate with validation/fastf1/fetch.py)
+validation/fastf1/cache/
+validation/fastf1/data/
+validation/fastf1/plots/

@@ -42,10 +42,10 @@ else
         src/data/TrackData.cpp \
         src/data/VehicleParams.cpp \
         src/data/SimulationState.cpp \
-        src/physics/AerodynamicsModel.cpp \
-        src/physics/TireModel.cpp \
         src/physics/PowertrainModel.cpp \
+        src/physics/VehicleModel.cpp \
         src/solver/GGVGenerator.cpp \
+        src/solver/RacingLine.cpp \
         src/solver/QuasiSteadyStateSolver.cpp \
         src/telemetry/TelemetryLogger.cpp \
         src/io/JSONParser.cpp \

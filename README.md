@@ -1,295 +1,107 @@
-# Lap Time Simulation Engine
+# LapPredictionEngine
 
-A C++ quasi-steady-state lap simulator for race cars and road cars.
+C++ lap prediction for real-time agents and engineering tools working with a small CPU budget.
 
-Give it a track and a vehicle definition, and it will:
-- estimate the fastest achievable lap time
-- generate per-segment telemetry
-- export a GGV map
-- write outputs automatically to `outputs/`
+Give it a track and a car. It predicts a lap, produces simulated telemetry, and exports a GGV envelope. The goal is useful physics that can run repeatedly on modest hardware. No GPU and no heavy runtime dependencies.
 
-The current version is self-contained:
-- no `JsonCpp`
-- no `Eigen`
-- direct JSON parsing is built into the repo
-- `build.sh` can fall back to a direct `g++` build when `cmake` is not installed
+This is a quasi-steady-state engine. It is not a full suspension simulator, and a close total lap time does not prove every corner is correct. The [validation report](validation/REVIEW_REPORT.md) shows the errors as well as the good results.
 
-## What It Models
+## Build
 
-- aerodynamic drag and downforce
-- tire grip with load sensitivity
-- longitudinal and lateral force sharing
-- engine torque curve, gearing, final drive, and shift time
-- forward/backward speed solving around a closed lap
-- telemetry export in CSV and optional JSON
-
-This is still a quasi-steady-state simulator, not a full transient vehicle model. It does not model things like:
-- suspension kinematics
-- tire temperature or wear
-- fuel burn
-- DRS
-- ERS deployment strategy
-- differential tuning
-- detailed aero platform sensitivity
-
-## Quick Start
-
-### Linux / macOS
+Needs a C++17 compiler and CMake. Python 3 is only needed for validation.
 
 ```bash
-chmod +x build.sh
-./build.sh
-
-./build/lap_sim examples/montreal.csv examples/f1_2025.json
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/lap_sim examples/Monza.csv examples/f1_2025_quali_lowdf.json
 ```
 
-### Windows
+For a small production build, configure with `-DBUILD_TESTING=OFF`. This builds the engine and library without the test and benchmark executables. `build.sh` also supports a direct GCC build if CMake is unavailable.
 
-```bat
-build.bat
-build\Release\lap_sim.exe examples\montreal.csv examples\f1_2025.json
+On Windows with MSVC:
+
+```powershell
+cmake -S . -B build
+cmake --build build --config Release
+./build/Release/lap_sim.exe examples/Monza.csv examples/f1_2025_quali_lowdf.json
 ```
 
-## CLI
+## Real-time use
+
+Prepare the track outside the update loop. Link the `lap_core` CMake target, keep the track alive, and reuse the solver. Changing a setup through `updateVehicle()` retains geometry when the track and line settings still match, while invalidating the old speed profile and telemetry.
+
+```cpp
+SolverOptions options;
+options.verbose = false;
+options.line.output_step = 2.0;
+QuasiSteadyStateSolver solver(track, car, options);
+solver.solve();                 // prepare geometry and predict the first lap
+solver.solve();                 // reuse geometry, corner limits and ERS bracket
+car.tire.mu_y *= 0.99;
+solver.updateVehicle(car);      // owns a copy; does not keep a reference to car
+solver.solve();                 // recompute with the changed setup
+auto telemetry = solver.getDetailedResult();
+```
+
+The engine uses tire lookup tables, a best-gear force map, cached geometry, and a checked warm start for the hybrid energy solve. It still recalculates the speed profile; the warm path does not simply return a cached lap time. Lookup accuracy is checked against the exact nonlinear model.
+
+For CLI use, `--ds 2` is the tested fast resolution and `--line-cache file` avoids rebuilding an unchanged line between processes. `--quiet --no-output --summary-json result.json` skips default file exports. GGV calculation happens only when requested.
+
+Measured runtimes, cold preparation, setup-update costs and the test CPU are in the report. Low-power hardware needs its own benchmark: this project targets real-time use, but does not promise a hard real-time deadline on every CPU. Process startup and file export also cost time.
+
+## Outputs
+
+| Output | What it contains | Option |
+|---|---|---|
+| Telemetry CSV | Time, distance, position, speed, acceleration/G, throttle/brake, steering, gear/RPM, forces, axle loads, ERS and DRS | Default; `--csv file` overrides the path |
+| GGV CSV | Acceleration/braking limits versus speed and lateral demand, plus feasibility flags | Default; `--ggv file` overrides the path |
+| GGV conditions JSON | Units, ERS/DRS state, braking sign and envelope assumptions | Written beside GGV as `.csv.meta.json` |
+| Telemetry JSON | Structured simulated lap telemetry | `--json file` |
+| Summary JSON | Lap time, speeds, energy, convergence and solve timing | `--summary-json file` |
+| Racing-line CSV | Sampled geometry, curvature, road profile and speeds | `--line-csv file` |
+| Exact line nodes | Editable lateral offsets for lossless reuse | `--line-nodes file` |
+
+Default files go into `outputs/` and are ignored by Git. `--no-output` disables the default telemetry/GGV exports; explicitly named exports still work.
+
+The GGV is a flat-road instantaneous envelope. By default it uses peak ERS where the car has it and keeps DRS closed. It does not apply the per-lap energy budget. Use `--ggv-no-ers` for combustion-only, or `--ggv-drs` to open DRS for acceleration; braking always uses closed DRS. `--no-ers` and `--no-drs` also constrain the map. Ignore points whose relevant feasibility flag is false.
+
+For exact line reuse, export `--line-nodes nodes.csv`, then use `--line given --line-file nodes.csv` with the same track and line options. A sampled `--line-csv` is for inspection; importing it can lose detail in tight corners.
+
+## Physics and inputs
+
+- Load-sensitive tires, combined longitudinal/lateral grip, axle load transfer, FWD/RWD/AWD and brake bias.
+- Drag/downforce, aero balance, rolling resistance, wheel/engine inertia and gear-shift interruption.
+- Banking, elevation, DRS zones and an approximate ERS energy budget.
+- A bounded minimum-curvature racing line, the centreline, or a supplied line.
+- Forward acceleration and backward braking with RK2 integration.
+
+Car files are JSON; tracks use the TUMFTM CSV layout `x_m,y_m,w_tr_right_m,w_tr_left_m`. Optional track sidecars are `<track>.drs.csv`, `<track>.banking.csv`, and `<track>.elevation.csv`.
+
+Examples include F1 2024/2025 qualifying packages, F2, Civic Si and Formula Student, across eleven circuits. The qualifying presets are calibrated effective models. F2 aero is estimated, and Zandvoort banking uses fitted effective averages. These are not manufacturer tire/aero maps. Earlier vehicle examples remain for compatibility.
+
+Useful controls:
 
 ```bash
-./build/lap_sim <track_csv_or_json> <vehicle_json> [options]
+./build/lap_sim examples/Monza.csv examples/f1_2025_quali_lowdf.json \
+  --ds 2 --quiet --no-output --summary-json outputs/result.json
 ```
 
-Options:
+`--air-density`, `--mu-scale`, and repeatable `--set section.field=value` change conditions or car parameters. `--no-drs`, `--no-ers`, `--no-banking`, and `--no-elevation` disable individual features. `--line mincurv|center|given` selects the line. Run `--help` for all options.
 
-- `--csv <file>` write telemetry CSV to a specific path
-- `--json <file>` write telemetry JSON to a specific path
-- `--ggv <file>` write GGV CSV to a specific path
-- `--iterations <N>` solver iteration cap, default `10`
-- `--tolerance <T>` convergence tolerance, default `0.001`
-- `--help` print usage
-
-If you do not provide output paths, the simulator still writes:
-- telemetry CSV to `outputs/<car>-<track>-<mm_ss>-VSIM.csv`
-- GGV CSV to `outputs/<car>-<track>-<mm_ss>-VSIM-GGV.csv`
-
-## Included Examples
-
-Vehicle presets in `examples/`:
-
-- `f1_2025.json` balanced 2025 F1 baseline
-- `f1_2025_normal.json`
-- `f1_2025_monza.json`
-- `f1_2025_monaco.json`
-- `f1_2024.json` balanced 2024 F1 baseline
-- `f1_2024_normal.json`
-- `f1_2024_monza.json`
-- `f1_2024_monaco.json`
-- `fsae_road_course.json`
-- `honda_civic_si_2025.json`
-
-Track files in `examples/`:
-
-- `montreal.csv`
-- `Zandvoort.csv`
-- `Monza.csv`
-- `Shanghai.csv`
-
-Useful runs:
+## Validation
 
 ```bash
-./build/lap_sim examples/Monza.csv examples/f1_2025_monza.json
-./build/lap_sim examples/Zandvoort.csv examples/f1_2025_monaco.json
-./build/lap_sim examples/montreal.csv examples/f1_2024.json
-./build/lap_sim examples/montreal.csv examples/fsae_road_course.json
-./build/lap_sim examples/montreal.csv examples/honda_civic_si_2025.json
+ctest --test-dir build --output-on-failure
+python3 validation/validate.py --binary ./build/lap_sim --json-out validation/results.json
+./build/lap_benchmark validation/benchmark_2m.json 2
 ```
 
-## Vehicle File Format
+For MSVC, use `ctest --test-dir build -C Release` and the executables under `build/Release/`.
 
-Vehicle definitions are JSON files.
+The review compares 27 official F1/F2 qualifying laps, keeps fitting and validation cases separate, and checks five car families on eleven tracks at 1 m and 2 m. Civic Si and Formula Student are numerical checks only; matched measured laps are still needed. The report includes references, speed-profile errors, benchmarks, and the original/incoming/revised comparison.
 
-Example:
+Important remaining work: front/rear lateral equilibrium and tire slip angles, a vehicle-specific minimum-time racing line, better measured tire/aero data, and optimized hybrid deployment. Tire temperature, wear, wet grip, traffic and driver error are outside the validated model.
 
-```json
-{
-  "name": "F1_2025_Normal",
-  "mass": {
-    "mass": 800.0,
-    "cog_height": 0.25,
-    "wheelbase": 3.60,
-    "weight_distribution": 0.46
-  },
-  "aerodynamics": {
-    "Cl": -4.2,
-    "Cd": 0.95,
-    "frontal_area": 1.42,
-    "air_density": 1.225
-  },
-  "tire": {
-    "mu_x": 1.95,
-    "mu_y": 2.34,
-    "load_sensitivity": 0.75,
-    "tire_radius": 0.33
-  },
-  "powertrain": {
-    "engine_torque_curve": {
-      "5000": 370,
-      "6000": 400,
-      "7000": 430
-    },
-    "gear_ratios": [10.8, 8.9, 7.4, 6.4, 5.7, 5.1, 4.5, 3.9],
-    "final_drive": 1.38,
-    "efficiency": 0.98,
-    "max_rpm": 15000,
-    "min_rpm": 5000,
-    "shift_time": 0.035
-  },
-  "brake": {
-    "max_brake_force": 32000,
-    "brake_bias": 0.62
-  }
-}
-```
+## References
 
-Field notes:
-
-- `mass.mass` total vehicle mass in kg
-- `mass.weight_distribution` front axle fraction from `0.0` to `1.0`
-- `aerodynamics.Cl` should be negative for downforce-producing cars
-- `tire.mu_x` and `tire.mu_y` are longitudinal and lateral grip coefficients
-- `powertrain.engine_torque_curve` maps RPM to torque in Nm
-- `powertrain.gear_ratios` must be listed from shortest gear to tallest gear
-- `powertrain.shift_time` is optional
-- `brake.brake_bias` is the front brake fraction from `0.0` to `1.0`
-
-## Track File Format
-
-The simulator supports:
-- TUMFTM-style CSV tracks
-- JSON track input through the parser
-
-The CSV format used by the bundled tracks is:
-
-```csv
-# x_m,y_m,w_tr_right_m,w_tr_left_m
-0.123,-0.739,5.388,5.699
-1.227,-5.613,5.352,5.669
-2.331,-10.486,5.316,5.640
-```
-
-Columns:
-
-- `x_m` centerline X coordinate
-- `y_m` centerline Y coordinate
-- `w_tr_right_m` track half-width to the right
-- `w_tr_left_m` track half-width to the left
-
-The solver preprocesses the centerline into arc length, heading, and curvature before solving.
-
-## Output Data
-
-The CSV telemetry includes:
-
-- timestamp
-- arc length
-- XYZ position
-- lateral offset from the working line
-- speed in m/s and km/h
-- longitudinal, lateral, and vertical acceleration
-- longitudinal, lateral, and total g
-- throttle and brake percentage
-- steering angle
-- gear and RPM
-- engine torque and wheel force
-- drag, downforce, longitudinal tire force, lateral tire force, and vertical load
-- curvature, radius, and banking
-
-The optional JSON export contains the same core telemetry grouped into:
-
-- position
-- velocity
-- acceleration
-- g-forces
-- controls
-- powertrain
-- forces
-- track
-
-## Build Notes
-
-### Linux / macOS
-
-- if `cmake` is available, `build.sh` uses it
-- otherwise `build.sh` compiles directly with `g++`
-
-### Windows
-
-- `build.bat` uses CMake and builds `build\Release\lap_sim.exe`
-
-### Dependencies
-
-Current direct dependencies are just a C++17-capable compiler and standard library support.
-
-Typical toolchains:
-
-- Linux: GCC or Clang
-- macOS: Apple Clang via Xcode Command Line Tools
-- Windows: MSVC via Visual Studio or Build Tools
-
-## Repo Layout
-
-```text
-.
-├── README.md
-├── CMakeLists.txt
-├── build.sh
-├── build.bat
-├── examples/
-├── include/
-│   ├── data/
-│   ├── io/
-│   ├── physics/
-│   ├── solver/
-│   └── telemetry/
-├── src/
-│   ├── data/
-│   ├── io/
-│   ├── physics/
-│   ├── solver/
-│   └── telemetry/
-└── outputs/
-```
-
-## Implementation Summary
-
-At a high level the solver does this:
-
-1. load track and vehicle data
-2. preprocess the track into a working path
-3. estimate a bounded racing line inside the track widths
-4. smooth curvature on the working path
-5. compute cornering speed limits
-6. sweep forward for acceleration limits
-7. sweep backward for braking limits
-8. iterate until lap time converges
-9. generate detailed telemetry
-10. export CSV, optional JSON, and GGV data
-
-## Verification
-
-The current codebase has been exercised with:
-
-- `bash build.sh`
-- `./build/lap_sim examples/Monza.csv examples/f1_2025_monza.json`
-- `./build/lap_sim examples/Zandvoort.csv examples/f1_2025_monaco.json`
-- `./build/lap_sim examples/montreal.csv examples/honda_civic_si_2025.json`
-
-## Credits
-
-This project is heavily inspired by the public research and tooling published by TUM Fast Technology Munich.
-
-Useful references:
-
-- TUMFTM laptime simulation: https://github.com/TUMFTM/laptime-simulation
-- TUMFTM racetrack database: https://github.com/TUMFTM/racetrack-database
-- Christ, Wischnewski, Heilmeier, Lohmann (2019): https://doi.org/10.1080/00423114.2019.1704804
-- Heilmeier, Graf, Lienkamp (2018): https://doi.org/10.1109/ITSC.2018.8570012
-
-The implementation in this repository is C++ and independent, but the overall workflow and track-format ideas are informed by that work.
+Independent C++ implementation, informed by [TUMFTM laptime simulation](https://github.com/TUMFTM/laptime-simulation) and the [TUMFTM racetrack database](https://github.com/TUMFTM/racetrack-database). Related work: [Christ et al.](https://doi.org/10.1080/00423114.2019.1704804) and [Heilmeier et al.](https://doi.org/10.1109/ITSC.2018.8570012). See [the gear-ratio guide](docs/GEAR_RATIO_GUIDE.md) for configuration help.
